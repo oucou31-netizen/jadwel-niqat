@@ -927,6 +927,16 @@
         </div>
 
         <!-- النص الملتقط / القابل للتعديل -->
+        <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-3 text-xs text-indigo-900 flex items-start gap-2 mb-2">
+          <i data-lucide="info" class="w-4 h-4 text-indigo-600 shrink-0 mt-0.5"></i>
+          <div class="space-y-1">
+            <p class="font-bold">نصائح للإملاء الصوتي:</p>
+            <ul class="list-disc list-inside space-y-0.5 text-indigo-800">
+              <li>اضغط «ابدأ التسجيل الصوتي» وانطق: <strong>«اسم التلميذ النقطة»</strong> (مثال: «أحمد بن علي 16 ونصف»).</li>
+              <li><strong>طريقة بديلة فورية على الهاتف:</strong> اضغط داخل مربع النص أدناه واستخدم أيقونة الميكروفون 🎙️ الموجودة في لوحة مفاتيح هاتفك (Gboard) للإملاء المباشر.</li>
+            </ul>
+          </div>
+        </div>
         <div class="space-y-1.5">
           <div class="flex items-center justify-between">
             <label class="text-xs font-bold text-slate-700">النص المنطوق (يمكنك التعديل أو الكتابة مباشرة):</label>
@@ -3456,6 +3466,8 @@
       rec.start();
     }
 
+    let voiceAnimFrame = null;
+
     async function toggleVoiceRecording() {
       if (isRecordingVoice) {
         stopVoiceRecording();
@@ -3465,34 +3477,28 @@
     }
 
     async function startVoiceRecording() {
+      const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRec) {
+        showToast('متصفحك لا يدعم التعرف الصوتي المباشر. يمكنك استخدام أيقونة الميكروفون 🎙️ في لوحة مفاتيح هاتفك أو كتابة النص يدوياً', 'error');
+        return;
+      }
+
       try {
-        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        recordedSampleRate = audioContext.sampleRate;
-        document.getElementById('voice-sample-rate-label').textContent = `مؤشر الصوت (WAV ${Math.round(recordedSampleRate / 1000)}kHz Mono)`;
-
-        const source = audioContext.createMediaStreamSource(mediaStream);
-        audioProcessor = audioContext.createScriptProcessor(4096, 1, 1);
-        recordedSamples = [];
-
-        const analyser = audioContext.createAnalyser();
-        analyser.fftSize = 128;
-        const silentGain = audioContext.createGain();
-        silentGain.gain.value = 0;
-        source.connect(analyser);
-        source.connect(audioProcessor);
-        audioProcessor.connect(silentGain);
-        silentGain.connect(audioContext.destination);
-
-        audioProcessor.onaudioprocess = (e) => {
-          if (!isRecordingVoice) return;
-          recordedSamples.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-        };
+        if (speechRecognition) {
+          try { speechRecognition.abort(); } catch(e) {}
+        }
+        speechRecognition = new SpeechRec();
+        const chosenDialect = document.getElementById('voice-dialect')?.value || 'ar-SA';
+        speechRecognition.lang = chosenDialect;
+        speechRecognition.continuous = true;
+        speechRecognition.interimResults = true;
+        speechRecognition.maxAlternatives = 1;
 
         isRecordingVoice = true;
         voiceStartTime = Date.now();
-        document.getElementById('voice-record-label').textContent = 'إيقاف التسجيل';
-        document.getElementById('btn-voice-record').classList.replace('bg-red-600', 'bg-slate-800');
+        document.getElementById('voice-record-label').textContent = 'إيقاف التسجيل الصوتي';
+        const recordBtn = document.getElementById('btn-voice-record');
+        recordBtn.classList.replace('bg-red-600', 'bg-slate-800');
 
         voiceTimerInterval = setInterval(() => {
           const sec = Math.floor((Date.now() - voiceStartTime) / 1000);
@@ -3501,121 +3507,120 @@
           document.getElementById('voice-timer').textContent = `${m}:${s}`;
         }, 500);
 
+        // Visualizer wave simulation
         const canvas = document.getElementById('voice-visualizer');
         const ctx = canvas.getContext('2d');
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
-        const drawVis = () => {
+        let step = 0;
+        const drawWave = () => {
           if (!isRecordingVoice) return;
-          requestAnimationFrame(drawVis);
-          analyser.getByteFrequencyData(dataArray);
+          step += 0.15;
           ctx.fillStyle = '#1e293b';
           ctx.fillRect(0, 0, canvas.width, canvas.height);
-          const barW = (canvas.width / dataArray.length) * 2;
-          let x = 0;
-          for (let i = 0; i < dataArray.length; i++) {
-            const h = (dataArray[i] / 255) * canvas.height;
-            ctx.fillStyle = '#34d399';
-            ctx.fillRect(x, canvas.height - h, barW - 1, h);
-            x += barW;
+          const bars = 32;
+          const barW = canvas.width / bars;
+          for (let i = 0; i < bars; i++) {
+            const h = Math.abs(Math.sin(step + i * 0.4)) * (canvas.height * 0.75) + 6;
+            ctx.fillStyle = i % 2 === 0 ? '#34d399' : '#10b981';
+            ctx.fillRect(i * barW + 1, (canvas.height - h) / 2, barW - 2, h);
+          }
+          voiceAnimFrame = requestAnimationFrame(drawWave);
+        };
+        drawWave();
+
+        const transcriptArea = document.getElementById('voice-transcript');
+        let sessionBaseText = transcriptArea.value.trim();
+
+        speechRecognition.onstart = () => {
+          showToast('الميكروفون يستمع الآن، تحدث بالأسماء والنقاط باللغة العربية...', 'info');
+        };
+
+        speechRecognition.onresult = (event) => {
+          let interim = '';
+          let finalSpoken = '';
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const res = event.results[i];
+            const transcript = res[0].transcript;
+            if (res.isFinal) {
+              finalSpoken += (finalSpoken ? ' ' : '') + transcript;
+            } else {
+              interim += transcript;
+            }
+          }
+
+          if (finalSpoken) {
+            sessionBaseText = sessionBaseText ? `${sessionBaseText} ، ${finalSpoken.trim()}` : finalSpoken.trim();
+          }
+
+          transcriptArea.value = interim
+            ? (sessionBaseText ? `${sessionBaseText} [${interim}]` : `[${interim}]`)
+            : sessionBaseText;
+          
+          transcriptArea.scrollTop = transcriptArea.scrollHeight;
+        };
+
+        speechRecognition.onerror = (event) => {
+          console.warn('SpeechRecognition error:', event.error);
+          if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+            showToast('تم رفض إذن استخدام الميكروفون. يرجى تفعيله من إعدادات المتصفح/الهاتف', 'error');
+            stopVoiceRecording();
+          } else if (event.error === 'network') {
+            showToast('خدمة التعرف الصوتي بحاجة لاتصال بالإنترنت', 'error');
+          } else if (event.error === 'language-not-supported' && chosenDialect !== 'ar-SA') {
+            const dial = document.getElementById('voice-dialect');
+            if (dial) dial.value = 'ar-SA';
+            speechRecognition.lang = 'ar-SA';
+            showToast('تم التبديل للعربية الفصحى (ar-SA) لضمان التوافق', 'info');
           }
         };
-        drawVis();
 
-        const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRec) {
-          showToast('متصفحك لا يدعم التفريغ الصوتي المباشر؛ استخدم Chrome أو Edge أو اكتب النص يدوياً', 'error');
-        } else {
-          speechRecognition = new SpeechRec();
-          const chosenDialect = document.getElementById('voice-dialect').value || 'ar-SA';
-          speechRecognition.lang = chosenDialect;
-          speechRecognition.continuous = true;
-          speechRecognition.interimResults = true;
-          let finalTranscript = document.getElementById('voice-transcript').value.trim();
-          let lastInterim = '';
-
-          speechRecognition.onresult = (event) => {
-            let interim = '';
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-              const txt = event.results[i][0].transcript.trim();
-              if (!txt) continue;
-              if (event.results[i].isFinal) {
-                if (isLatinOnlyText(txt) && chosenDialect !== 'ar-SA') {
-                  showToast('المتصفح حوّل النطق للإنجليزية لأن اللهجة المختارة غير مدعومة؛ اختر "العربية الفصحى (ar-SA)"', 'info');
-                }
-                finalTranscript = finalTranscript ? `${finalTranscript} ، ${txt}` : txt;
-              } else {
-                interim += (interim ? ' ' : '') + txt;
+        speechRecognition.onend = () => {
+          // If still recording, restart recognition cleanly with timeout to avoid Android InvalidStateError
+          if (isRecordingVoice && speechRecognition) {
+            setTimeout(() => {
+              if (isRecordingVoice && speechRecognition) {
+                try {
+                  speechRecognition.start();
+                } catch(e) {}
               }
-            }
-            lastInterim = interim;
-            document.getElementById('voice-transcript').value = interim
-              ? (finalTranscript ? `${finalTranscript} ${interim}` : interim)
-              : finalTranscript;
-          };
-          speechRecognition.onerror = (event) => {
-            if (event.error === 'language-not-supported' && chosenDialect !== 'ar-SA') {
-              document.getElementById('voice-dialect').value = 'ar-SA';
-              speechRecognition.lang = 'ar-SA';
-              showToast('تم التبديل تلقائياً إلى العربية الفصحى (ar-SA) لتوافقها مع المتصفح', 'info');
-            } else if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-              showToast('تم رفض إذن الميكروفون أو خدمة التعرف الصوتي في المتصفح', 'error');
-            } else if (event.error === 'network') {
-              showToast('تعذر الاتصال بخدمة التعرف الصوتي للمتصفح (تتطلب اتصالاً بالإنترنت)', 'error');
-            } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
-              showToast(`خطأ في التعرف الصوتي: ${event.error}`, 'error');
-            }
-          };
-          speechRecognition.onend = () => {
-            if (lastInterim) {
-              finalTranscript = finalTranscript ? `${finalTranscript} ، ${lastInterim}` : lastInterim;
-              lastInterim = '';
-              document.getElementById('voice-transcript').value = finalTranscript;
-            }
-            if (isRecordingVoice && speechRecognition) {
-              try {
-                finalTranscript = document.getElementById('voice-transcript').value.trim();
-                speechRecognition.start();
-              } catch (err) {}
-            }
-          };
-          speechRecognition.start();
-        }
-      } catch (e) {
-        showToast('تعذر الوصول للميكروفون، يمكنك كتابة الأسماء والنقاط يدوياً في المربع أدناه', 'error');
+            }, 200);
+          }
+        };
+
+        speechRecognition.start();
+
+      } catch (err) {
+        showToast('تعذر تشغيل الميكروفون: ' + err.message, 'error');
+        stopVoiceRecording();
       }
     }
 
     function stopVoiceRecording() {
       isRecordingVoice = false;
       clearInterval(voiceTimerInterval);
+      if (voiceAnimFrame) {
+        cancelAnimationFrame(voiceAnimFrame);
+        voiceAnimFrame = null;
+      }
       document.getElementById('voice-record-label').textContent = 'ابدأ التسجيل الصوتي';
-      document.getElementById('btn-voice-record').classList.replace('bg-slate-800', 'bg-red-600');
+      const recordBtn = document.getElementById('btn-voice-record');
+      recordBtn.classList.replace('bg-slate-800', 'bg-red-600');
 
       if (speechRecognition) {
         try { speechRecognition.stop(); } catch (e) {}
       }
-      if (audioProcessor) {
-        audioProcessor.disconnect();
-        audioProcessor = null;
-      }
-      if (mediaStream) {
-        mediaStream.getTracks().forEach(t => t.stop());
-        mediaStream = null;
-      }
-      if (audioContext) {
-        audioContext.close().catch(() => {});
-        audioContext = null;
+
+      // Clean brackets if any interim remained
+      const transcriptArea = document.getElementById('voice-transcript');
+      if (transcriptArea) {
+        transcriptArea.value = transcriptArea.value.replace(/\[[^\]]*\]/g, '').trim();
       }
 
-      if (recordedSamples.length > 0) {
-        const wavBlob = encodeFloat32ToWav(recordedSamples, recordedSampleRate);
-        lastRecordedWavBlob = wavBlob;
-        const playback = document.getElementById('voice-playback');
-        if (playback.src && playback.src.startsWith('blob:')) {
-          URL.revokeObjectURL(playback.src);
-        }
-        playback.src = URL.createObjectURL(wavBlob);
-        playback.classList.remove('hidden');
+      // Clear visualizer
+      const canvas = document.getElementById('voice-visualizer');
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
       }
     }
 

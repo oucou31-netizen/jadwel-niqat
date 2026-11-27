@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jadwel-niqat-v4';
+const CACHE_NAME = 'jadwel-niqat-v5';
 const PRECACHE_URLS = [
   './',
   './index.html',
