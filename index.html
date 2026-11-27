@@ -1192,7 +1192,9 @@
 
       // تسجيل Service Worker الحقيقي على نفس النطاق (يعمل على http/https و localhost)
       if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
-        navigator.serviceWorker.register('./sw.js').catch(() => {});
+        navigator.serviceWorker.register('./sw.js').then((reg) => {
+          reg.update();
+        }).catch(() => {});
       }
     }
 
