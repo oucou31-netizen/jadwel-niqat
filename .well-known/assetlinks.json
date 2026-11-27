@@ -1,0 +1,8 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "io.github.oucou31_netizen.twa",
+    "sha256_cert_fingerprints": ["EF:61:6F:4E:9B:49:60:9D:B2:E0:30:67:BA:A9:F0:AC:3B:D3:F4:C6:6B:D9:55:50:11:2E:CC:5C:3B:35:90:A5"]
+  }
+}]
